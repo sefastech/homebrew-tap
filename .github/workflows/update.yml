@@ -1,0 +1,41 @@
+name: Update stable Clutta
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 7 * * *'
+permissions:
+  contents: write
+  pull-requests: write
+concurrency:
+  group: stable-formula-update
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - run: node scripts/update.mjs
+      - run: node --test scripts/update.test.mjs
+      - name: Propose reviewed update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- Formula/clutta.rb; then exit 0; fi
+          VERSION=$(sed -n 's/^  version "\([0-9.]*\)"$/\1/p' Formula/clutta.rb)
+          BRANCH="update/clutta-${VERSION}"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "An update branch already exists; review it instead of overwriting it."
+            exit 0
+          fi
+          git switch -c "$BRANCH"
+          git config user.name 'Clutta Bot'
+          git config user.email 'bot@clutta.io'
+          git add Formula/clutta.rb
+          git commit -m "Update Clutta to ${VERSION}"
+          git push origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" --title "Update Clutta to ${VERSION}" \
+            --body 'Both macOS binaries match the published checksums. Run the macOS installation workflow on this branch before merging; bot-created PRs may not trigger workflows automatically.'
